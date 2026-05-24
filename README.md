@@ -81,6 +81,12 @@ git clone --depth=1 https://ghproxy.com/https://github.com/YUYUYUYU2147/hitokoto
 - node-fetch
 - moment
 
+## 贡献者 ✨
+
+<a href="https://github.com/YUYUYUYU2147/hitokoto-sign-plugin/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=YUYUYUYU2147/hitokoto-sign-plugin" />
+</a>
+
 ## 资源 📚
 
 - [一言 API 文档](https://developer.hitokoto.cn/)
