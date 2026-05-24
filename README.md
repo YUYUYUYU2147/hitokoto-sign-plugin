@@ -9,7 +9,17 @@
 | LLOneBot | `app/autosign-llonebot.js` | ✅ | ❌ |
 | Napcat | `app/napcat-hitokoto.js` | ✅ | ✅ |
 
-## 安装
+## 安装与更新
+
+### TRSSYz / Yunzai-Bot
+
+```bash
+# 直接克隆
+git clone --depth=1 https://github.com/YUYUYUYU2147/hitokoto-sign-plugin ./plugins/hitokoto-sign-plugin/
+
+# 国内加速
+git clone --depth=1 https://ghproxy.com/https://github.com/YUYUYUYU2147/hitokoto-sign-plugin ./plugins/hitokoto-sign-plugin/
+```
 
 将对应协议端的 `.js` 文件放入 TRSSYz 的 `plugins` 目录。
 
