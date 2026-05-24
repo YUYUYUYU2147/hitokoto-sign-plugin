@@ -2,6 +2,18 @@
 
 自动获取一言内容，定时更新 QQ 个性签名和 QQ 空间说说的插件。
 
+## 介绍 📝
+
+**hitokoto-sign-plugin** 是一个 TRSSYz 的扩展插件，提供一言签名自动更新和 QQ 空间说说自动发布功能。
+
+> 💡 **Tip**
+>
+> 一言 API: https://v1.hitokoto.cn
+
+> ⚠️ **Warning**
+>
+> 仅支持 LLOneBot / NapCatQQ 等 OneBot11 协议端
+
 ## 支持协议端
 
 | 协议端 | 文件 | 签名 | 说说 |
@@ -9,9 +21,9 @@
 | LLOneBot | `app/autosign-llonebot.js` | ✅ | ❌ |
 | Napcat | `app/napcat-hitokoto.js` | ✅ | ✅ |
 
-## 安装与更新
+## 安装与更新 🔧
 
-### TRSSYz / Yunzai-Bot
+### TRSSYz 🚀
 
 ```bash
 # 直接克隆
@@ -68,3 +80,7 @@ git clone --depth=1 https://ghproxy.com/https://github.com/YUYUYUYU2147/hitokoto
 - node-schedule
 - node-fetch
 - moment
+
+## 资源 📚
+
+- [一言 API 文档](https://developer.hitokoto.cn/)
