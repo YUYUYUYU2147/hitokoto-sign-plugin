@@ -35,6 +35,12 @@ git clone --depth=1 https://ghproxy.com/https://github.com/YUYUYUYU2147/hitokoto
 
 将对应协议端的 `.js` 文件放入 TRSSYz 的 `plugins` 目录。
 
+## 安装依赖 📦
+
+```bash
+pnpm install --filter=hitokoto-sign-plugin
+```
+
 ## 配置
 
 首次启动后自动生成 `config.json`，可手动编辑：
