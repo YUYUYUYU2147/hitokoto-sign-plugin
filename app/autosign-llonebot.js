@@ -1,5 +1,6 @@
 /**
- * 插件：自动一言签名与说说 v3.0
+ * 插件：自动一言签名与说说 v3.1
+ * 支持多开 Bot，每个 Bot 独立配置
  * 签名：通过 OneBot11 set_qq_profile 更新
  * 说说：尝试通过 icqq 原生协议发送到 QQ 空间
  */
@@ -13,7 +14,6 @@ import path from 'path'
 const dirPath = path.join(process.cwd(), 'plugins/hitokoto-sign-plugin/')
 if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true })
 
-const configPath = path.join(dirPath, 'config.json')
 const defaultConfig = {
   signCron: '0 0 */6 * * *',
   shuoshuoCron: '0 0 * * * *',
@@ -25,41 +25,55 @@ const defaultConfig = {
   shuoshuoPrefix: '分享一条一言：',
   llonebotHttp: 'http://113.31.103.19:3001',
   llonebotToken: '775825',
-  selfQq: '3885339490',
+  selfQq: '',
   masterQq: '1390963734',
-  shuoshuoMode: 'private'  // qzone=发空间说说(LLOneBot不支持), private=私聊主人
+  shuoshuoMode: 'private',
+  enabled: true  // 是否启用此Bot的插件功能
 }
 
-let config
-function loadConfig() {
+function getConfigPath(selfQq) {
+  return path.join(dirPath, `config-${selfQq}.json`)
+}
+
+function loadConfig(selfQq) {
+  const configPath = getConfigPath(selfQq)
   try {
     if (fs.existsSync(configPath)) {
-      config = { ...defaultConfig, ...JSON.parse(fs.readFileSync(configPath, 'utf8')) }
-    } else {
-      config = { ...defaultConfig }
-      fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8')
+      return { ...defaultConfig, ...JSON.parse(fs.readFileSync(configPath, 'utf8')) }
     }
-  } catch (e) { config = { ...defaultConfig } }
+  } catch (e) {}
+  const cfg = { ...defaultConfig, selfQq }
+  try { fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2), 'utf8') } catch (e) {}
+  return cfg
 }
-function saveConfig() {
-  try { fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8') } catch (e) {}
-}
-loadConfig()
 
-// ===== LLOneBot HTTP 调用 =====
-// OneBot11 标准格式：POST /action_name body只传params，不包裹action字段
-async function callLLOneBot(action, params) {
+function saveConfig(selfQq, config) {
+  try { fs.writeFileSync(getConfigPath(selfQq), JSON.stringify(config, null, 2), 'utf8') } catch (e) {}
+}
+
+const legacyConfigPath = path.join(dirPath, 'config.json')
+if (fs.existsSync(legacyConfigPath)) {
+  try {
+    const legacy = JSON.parse(fs.readFileSync(legacyConfigPath, 'utf8'))
+    if (legacy.selfQq) {
+      saveConfig(legacy.selfQq, { ...defaultConfig, ...legacy })
+      fs.renameSync(legacyConfigPath, legacyConfigPath + '.bak')
+      console.log('[一言] 已迁移旧配置到 config-' + legacy.selfQq + '.json')
+    }
+  } catch (e) {}
+}
+
+async function callLLOneBot(action, params, config) {
   const headers = { 'Content-Type': 'application/json' }
   if (config.llonebotToken) headers['Authorization'] = `Bearer ${config.llonebotToken}`
   const res = await fetch(`${config.llonebotHttp}/${action}`, {
     method: 'POST', headers,
-    body: JSON.stringify(params)  // 直接传params，不包裹 action 字段
+    body: JSON.stringify(params)
   })
   return res.json()
 }
 
-// Milky 协议调用：POST /api/xxx
-async function callMilkyAPI(endpoint, params) {
+async function callMilkyAPI(endpoint, params, config) {
   const headers = { 'Content-Type': 'application/json' }
   if (config.llonebotToken) headers['Authorization'] = `Bearer ${config.llonebotToken}`
   const res = await fetch(`${config.llonebotHttp}${endpoint}`, {
@@ -69,14 +83,11 @@ async function callMilkyAPI(endpoint, params) {
   return res.json()
 }
 
-// ===== 深度扫描：收集所有方法 =====
 function collectAllMethods(obj, label, depth = 0, maxDepth = 4, visited = new Set()) {
   if (!obj || typeof obj !== 'object' || depth > maxDepth) return []
   if (visited.has(obj)) return []
   visited.add(obj)
-  
   const results = []
-  
   try {
     const keys = new Set()
     try { Object.keys(obj).forEach(k => keys.add(k)) } catch (e) {}
@@ -86,42 +97,33 @@ function collectAllMethods(obj, label, depth = 0, maxDepth = 4, visited = new Se
       if (proto && proto !== Object.prototype && !visited.has(proto))
         Object.getOwnPropertyNames(proto).forEach(k => keys.add(k))
     } catch (e) {}
-
     for (const key of keys) {
       if (['constructor', '__proto__', 'prototype', 'length', 'name', 'caller', 'arguments',
            'toString', 'toJSON', 'valueOf', 'hasOwnProperty', 'isPrototypeOf',
            'propertyIsEnumerable'].includes(key)) continue
-      
       const fullPath = `${label}.${key}`
       let val
       try { val = obj[key] } catch (e) { continue }
-      
       if (typeof val === 'function') {
         results.push({ path: fullPath, type: 'function' })
       } else if (val && typeof val === 'object' && !Array.isArray(val)) {
         results.push({ path: fullPath, type: 'object' })
-        // 继续深入
         if (depth < maxDepth) {
           results.push(...collectAllMethods(val, fullPath, depth + 1, maxDepth, visited))
         }
       }
     }
   } catch (e) {}
-  
   return results
 }
 
-// ===== 分类方法 =====
 function categorizeMethods(methods) {
   const qzoneKeywords = /qzone|shuoshuo|feed|mood|zone|space|说说|空间/i
   const sendKeywords = /send|publish|post|write|create|add|insert|update|set|doCard|doLike|doComment/i
   const profileKeywords = /profile|sign|签名|nick|备注|头像|avatar/i
   const oidbKeywords = /oidb|Oidb|OIDB|protobuf|pbSend|pkg/i
   const httpKeywords = /http|request|fetch|api|rest/i
-  const qqKeywords = /^qq$/i
-  
   const qzone = [], send = [], profile = [], oidb = [], http = [], other = []
-  
   for (const m of methods) {
     const k = m.path
     if (qzoneKeywords.test(k)) qzone.push(m)
@@ -131,7 +133,6 @@ function categorizeMethods(methods) {
     else if (sendKeywords.test(k)) send.push(m)
     else other.push(m)
   }
-  
   return { qzone, send, profile, oidb, http, other }
 }
 
@@ -160,26 +161,32 @@ export class HitokotoSignPlugin extends plugin {
     })
     this._botRef = null
     this._fullMethodsCache = null
-    this.init()
+    this._jobs = {}
+    this._updating = new Set()  // 防止同一Bot重复执行
   }
 
-  init() { this.refreshSchedule() }
+  getConfig(e) {
+    const selfQq = e?.bot?.self_id || e?.self_id || ''
+    return loadConfig(selfQq)
+  }
 
-  refreshSchedule() {
-    if (this.signJob) { this.signJob.cancel(); this.signJob = null }
-    if (this.shuoshuoJob) { this.shuoshuoJob.cancel(); this.shuoshuoJob = null }
+  refreshSchedule(selfQq, config) {
+    if (!selfQq) return
+    if (this._jobs[selfQq]?.signJob) { this._jobs[selfQq].signJob.cancel() }
+    if (this._jobs[selfQq]?.shuoshuoJob) { this._jobs[selfQq].shuoshuoJob.cancel() }
+    this._jobs[selfQq] = {}
     if (config.enableSignUpdate) {
-      this.signJob = schedule.scheduleJob(config.signCron, () => this.updateSign())
+      this._jobs[selfQq].signJob = schedule.scheduleJob(config.signCron, () => this.updateSign(selfQq, config))
     }
     if (config.enableShuoshuoUpdate) {
-      this.shuoshuoJob = schedule.scheduleJob(config.shuoshuoCron, () => this.updateShuoshuo())
+      this._jobs[selfQq].shuoshuoJob = schedule.scheduleJob(config.shuoshuoCron, () => this.updateShuoshuo(selfQq, config))
     }
   }
 
-  async getHitokoto() {
+  async getHitokoto(cfg) {
     try {
-      let url = config.hitokotoApi
-      if (config.hitokotoType) url += `?c=${config.hitokotoType}`
+      let url = cfg.hitokotoApi
+      if (cfg.hitokotoType) url += `?c=${cfg.hitokotoType}`
       const res = await fetch(url)
       const data = await res.json()
       return {
@@ -192,59 +199,50 @@ export class HitokotoSignPlugin extends plugin {
     }
   }
 
-  // ===== 签名更新 =====
-  async updateSign() {
+  async updateSign(selfQq, cfg) {
+    if (!cfg) cfg = loadConfig(selfQq)
     try {
-      const hitokoto = await this.getHitokoto()
-      const signText = `${config.signPrefix}${hitokoto.content}`
-      
-      let currentNick = config.selfQq
+      const hitokoto = await this.getHitokoto(cfg)
+      const signText = `${cfg.signPrefix}${hitokoto.content}`
+      let currentNick = selfQq
       try {
-        const info = await callLLOneBot('get_login_info', {})
+        const info = await callLLOneBot('get_login_info', {}, cfg)
         if (info && info.data && info.data.nickname) currentNick = info.data.nickname
       } catch (e) {}
-      
-      await callLLOneBot('set_qq_profile', { nickname: currentNick, personal_note: signText })
-      this.logHistory('sign', hitokoto)
+      await callLLOneBot('set_qq_profile', { nickname: currentNick, personal_note: signText }, cfg)
+      this.logHistory('sign', hitokoto, selfQq)
     } catch (e) {
-      console.error('[一言] 签名更新失败:', e.message || e)
+      console.error(`[一言][${selfQq}] 签名更新失败:`, e.message || e)
     }
   }
 
-  // ===== 说说发送 =====
-  async updateShuoshuo() {
-    const hitokoto = await this.getHitokoto()
-    const content = `${config.shuoshuoPrefix}${hitokoto.full}`
-
-    if (config.shuoshuoMode === 'private') {
-      await this.sendPrivateShuoshuo(content)
+  async updateShuoshuo(selfQq, cfg) {
+    if (!cfg) cfg = loadConfig(selfQq)
+    const hitokoto = await this.getHitokoto(cfg)
+    const content = `${cfg.shuoshuoPrefix}${hitokoto.full}`
+    if (cfg.shuoshuoMode === 'private') {
+      await this.sendPrivateShuoshuo(content, cfg)
     } else {
-      // 尝试通过 icqq 内部协议发送 Qzone 说说
       const sent = await this.trySendQzoneViaIcq(content)
       if (!sent) {
-        console.log('[一言] Qzone发送失败，降级为私聊')
-        await this.sendPrivateShuoshuo(content)
+        console.log(`[一言][${selfQq}] Qzone发送失败，降级为私聊`)
+        await this.sendPrivateShuoshuo(content, cfg)
       }
     }
-    this.logHistory('shuoshuo', hitokoto)
+    this.logHistory('shuoshuo', hitokoto, selfQq)
   }
 
-  // 通过 icqq 内部协议发送 Qzone 说说
   async trySendQzoneViaIcq(content) {
     if (!this._botRef) return false
-    
     try {
-      // 尝试路径1: bot.fl (icqq Client) 上的方法
       const icqq = this._botRef.fl
       if (icqq) {
-        // 尝试已知可能的 Qzone 方法名
         const possibleMethods = [
           'publishQzoneFeed', 'sendQzoneFeed', 'qzonePublish', 'publishFeed',
           'sendFeed', 'writeMood', 'sendMood', 'publishMood',
           'qzone_send', 'sendQzone', 'postQzone', 'addFeed',
           'createFeed', 'publishShuoshuo', 'sendShuoshuo'
         ]
-        
         for (const methodName of possibleMethods) {
           try {
             if (typeof icqq[methodName] === 'function') {
@@ -257,14 +255,10 @@ export class HitokotoSignPlugin extends plugin {
             console.log(`[一言] fl.${methodName} 调用失败:`, e.message)
           }
         }
-
-        // 尝试路径2: 通过 OIDB 发送
         if (typeof icqq.sendOidb === 'function') {
-          // Qzone 发说说的 OIDB 命令: 0x972 (新版) 或 0xb77 (旧版)
           for (const cmd of [0x972, 0xb77, 0x8b5, 0x8a4]) {
             try {
               console.log(`[一言] 尝试 OIDB 命令: 0x${cmd.toString(16)}`)
-              // Qzone 说说协议包数据（简化版）
               const body = this.buildQzoneFeedBody(content)
               if (body) {
                 const result = await icqq.sendOidb(`OidbSvc.0x${cmd.toString(16)}`, body)
@@ -276,8 +270,6 @@ export class HitokotoSignPlugin extends plugin {
             }
           }
         }
-
-        // 尝试路径3: 通过 pkg/packet/rawSend 发送原始包
         for (const mName of ['sendPacket', 'send', 'pkg', 'sendRaw', 'sendPb']) {
           try {
             if (typeof icqq[mName] === 'function') {
@@ -285,8 +277,6 @@ export class HitokotoSignPlugin extends plugin {
             }
           } catch (e) {}
         }
-
-        // 尝试路径4: 查找 icqq 子模块
         for (const subKey of ['qzone', 'Qzone', 'qz', 'feed', 'shuoshuo', 'mood']) {
           try {
             const sub = icqq[subKey]
@@ -304,22 +294,16 @@ export class HitokotoSignPlugin extends plugin {
     } catch (e) {
       console.error('[一言] trySendQzoneViaIcq 出错:', e.message)
     }
-    
     return false
   }
 
-  // 构建 Qzone 说说 Protobuf 数据
   buildQzoneFeedBody(content) {
     try {
-      // LLOneBot/NTQQ 的说说协议
-      // 尝试查找是否有内置的 protobuf 编码
       const bot = this._botRef
       if (bot.fl && typeof bot.fl.encodeProtobuf === 'function') {
-        // 说说发表的简化 protobuf 结构
-        // 实际结构需要根据 NTQQ 版本确定
         const body = bot.fl.encodeProtobuf({
-          1: { 1: content, 2: { 1: 0 } }, // 纯文本说说
-          2: 0  // 无图片
+          1: { 1: content, 2: { 1: 0 } },
+          2: 0
         })
         return body
       }
@@ -329,24 +313,24 @@ export class HitokotoSignPlugin extends plugin {
     }
   }
 
-  async sendPrivateShuoshuo(content) {
+  async sendPrivateShuoshuo(content, cfg) {
     if (!this._botRef) return
     try {
       if (this._botRef.adapter?.sendFriendMsg) {
-        await this._botRef.adapter.sendFriendMsg(config.masterQq, content)
+        await this._botRef.adapter.sendFriendMsg(cfg.masterQq, content)
       } else {
         await callLLOneBot('send_private_msg', {
-          user_id: config.masterQq,
+          user_id: cfg.masterQq,
           message: content
-        })
+        }, cfg)
       }
     } catch (e) {
       console.error('[一言] 私聊发送失败:', e.message)
     }
   }
 
-  logHistory(type, hitokoto) {
-    const hp = path.join(dirPath, 'history.json')
+  logHistory(type, hitokoto, selfQq) {
+    const hp = path.join(dirPath, `history-${selfQq}.json`)
     let h = []
     if (fs.existsSync(hp)) try { h = JSON.parse(fs.readFileSync(hp, 'utf8')) } catch (e) {}
     h.push({ type, content: hitokoto.content, from: hitokoto.from,
@@ -355,10 +339,8 @@ export class HitokotoSignPlugin extends plugin {
     try { fs.writeFileSync(hp, JSON.stringify(h, null, 2), 'utf8') } catch (e) {}
   }
 
-  // ===== 全量扫描：列出所有方法 =====
   async fullScan(e) {
     if (!e.isMaster) return e.reply('仅主人可用')
-
     const targets = []
     if (e.bot) {
       targets.push({ name: 'e.bot', obj: e.bot })
@@ -369,15 +351,12 @@ export class HitokotoSignPlugin extends plugin {
       targets.push({ name: 'Bot', obj: Bot })
       if (Bot.fl) targets.push({ name: 'Bot.fl (icqq)', obj: Bot.fl })
     }
-
     const lines = []
     for (const t of targets) {
       const methods = collectAllMethods(t.obj, t.name, 0, 3)
       const cats = categorizeMethods(methods)
-      
       lines.push(`\n=== ${t.name} ===`)
       lines.push(`总方法数: ${methods.length}`)
-      
       if (cats.qzone.length > 0) {
         lines.push(`\n🔴 Qzone/空间/说说 (${cats.qzone.length}):`)
         cats.qzone.forEach(m => lines.push(`  ${m.path}`))
@@ -395,22 +374,16 @@ export class HitokotoSignPlugin extends plugin {
         cats.profile.forEach(m => lines.push(`  ${m.path}`))
       }
     }
-
     this._fullMethodsCache = targets
     await e.reply(lines.join('\n').substring(0, 3500) || '未找到任何方法')
   }
 
-  // ===== 扫描协议层方法 =====
   async scanProtocol(e) {
     if (!e.isMaster) return e.reply('仅主人可用')
-
     const lines = []
-    
     if (e.bot && e.bot.fl) {
       const fl = e.bot.fl
       lines.push('=== e.bot.fl (icqq Client) 属性列表 ===')
-      
-      // 列出 icqq Client 的所有自有属性和方法
       try {
         const allKeys = Object.getOwnPropertyNames(fl)
         for (const key of allKeys) {
@@ -421,7 +394,6 @@ export class HitokotoSignPlugin extends plugin {
             if (type === 'function') {
               lines.push(`  📌 ${key}() - 函数`)
             } else if (type === 'object' && val !== null) {
-              // 列出对象的自有方法
               try {
                 const subKeys = Object.getOwnPropertyNames(val)
                   .filter(k => typeof val[k] === 'function' && k !== 'constructor')
@@ -443,8 +415,6 @@ export class HitokotoSignPlugin extends plugin {
       } catch (e) {
         lines.push(`  扫描失败: ${e.message}`)
       }
-
-      // 检查 icqq 的版本信息
       lines.push(`\n=== icqq 检查 ===`)
       try {
         const packagePath = path.join(process.cwd(), 'node_modules/icqq/package.json')
@@ -454,14 +424,12 @@ export class HitokotoSignPlugin extends plugin {
         } else {
           lines.push(`  icqq 包路径不存在: ${packagePath}`)
         }
-        // 检查 node_modules
         const mm = path.join(process.cwd(), 'node_modules/icqq')
         if (fs.existsSync(mm)) {
           const icqqFiles = fs.readdirSync(mm).filter(f => f.includes('qzone') || f.includes('Qzone'))
           if (icqqFiles.length > 0) {
             lines.push(`  Qzone 相关文件: ${icqqFiles.join(', ')}`)
           }
-          // 读取 lib 目录
           const libPath = path.join(mm, 'lib')
           if (fs.existsSync(libPath)) {
             const libFiles = fs.readdirSync(libPath)
@@ -469,7 +437,6 @@ export class HitokotoSignPlugin extends plugin {
             if (qzoneInLib.length > 0) {
               lines.push(`  lib/ 中 Qzone 文件: ${qzoneInLib.join(', ')}`)
             }
-            // 列出所有文件以便分析
             const allFiles = libFiles.join(', ')
             lines.push(`  lib/ 全部文件: ${allFiles.substring(0, 500)}`)
           }
@@ -478,18 +445,20 @@ export class HitokotoSignPlugin extends plugin {
         lines.push(`  检查包失败: ${e.message}`)
       }
     }
-
     await e.reply(lines.join('\n').substring(0, 3500))
   }
 
-  // ===== 指令处理 =====
   async showHelp(e) {
     if (!e.isMaster) return e.reply('仅主人可用')
-    e.reply(`一言签名 & 说说插件 v3.0
+    const selfQq = e.bot?.self_id || e.self_id || ''
+    const cfg = this.getConfig(e)
+    if (!cfg.enabled) return
+    e.reply(`一言签名 & 说说插件 v3.1
 ==============
-签名更新：${config.enableSignUpdate ? '✅' : '❌'}
-说说发送：${config.enableShuoshuoUpdate ? '✅' : '❌'}
-说说模式：${config.shuoshuoMode === 'qzone' ? 'Qzone空间(自动降级)' : '私聊主人'}
+当前Bot：${selfQq}
+签名更新：${cfg.enableSignUpdate ? '✅' : '❌'}
+说说发送：${cfg.enableShuoshuoUpdate ? '✅' : '❌'}
+说说模式：${cfg.shuoshuoMode === 'qzone' ? 'Qzone空间(自动降级)' : '私聊主人'}
 
 指令：
 #一言签名开启/关闭
@@ -507,112 +476,127 @@ export class HitokotoSignPlugin extends plugin {
 
   async toggleFeature(e) {
     if (!e.isMaster) return e.reply('仅主人可用')
+    const selfQq = e.bot?.self_id || e.self_id || ''
+    const cfg = this.getConfig(e)
+    if (!cfg.enabled) return
     const m = e.msg.match(/^#(一言签名|一言说说)(开启|关闭)$/)
     if (!m) return e.reply('指令格式错误')
     const cmd = m[1], act = m[2]
     if (cmd === '一言签名') {
-      config.enableSignUpdate = act === '开启'
-      if (this.signJob) { this.signJob.cancel(); this.signJob = null }
-      if (config.enableSignUpdate) this.signJob = schedule.scheduleJob(config.signCron, () => this.updateSign())
+      cfg.enableSignUpdate = act === '开启'
     } else {
-      config.enableShuoshuoUpdate = act === '开启'
-      if (this.shuoshuoJob) { this.shuoshuoJob.cancel(); this.shuoshuoJob = null }
-      if (config.enableShuoshuoUpdate) this.shuoshuoJob = schedule.scheduleJob(config.shuoshuoCron, () => this.updateShuoshuo())
+      cfg.enableShuoshuoUpdate = act === '开启'
     }
-    e.reply(`${cmd}自动更新已${act}`)
-    saveConfig()
+    saveConfig(selfQq, cfg)
+    this.refreshSchedule(selfQq, cfg)
+    e.reply(`[${selfQq}] ${cmd}自动更新已${act}`)
   }
 
   async updateNow(e) {
     if (!e.isMaster) return e.reply('仅主人可用')
     if (e.bot) this._botRef = e.bot
-
+    const selfQq = e.bot?.self_id || e.self_id || ''
+    const cfg = this.getConfig(e)
+    if (!cfg.enabled) return
+    // 防止同一Bot重复执行
+    const lockKey = `${selfQq}_${e.msg}`
+    if (this._updating.has(lockKey)) {
+      return e.reply('⏳ 操作进行中，请稍候...')
+    }
+    this._updating.add(lockKey)
     const m = e.msg.match(/^#一言立即更新(签名|说说)$/)
-    if (!m) return e.reply('指令格式错误')
+    if (!m) {
+      this._updating.delete(lockKey)
+      return e.reply('指令格式错误')
+    }
     const type = m[1]
-
+    try {
       if (type === '签名') {
-      await e.reply('⏳ 正在更新签名...')
-      try {
-        const hitokoto = await this.getHitokoto()
-        const signText = `${config.signPrefix}${hitokoto.content}`
-        
-        let currentNick = config.selfQq
+        await e.reply(`⏳ 正在更新签名...`)
+        const hitokoto = await this.getHitokoto(cfg)
+        const signText = `${cfg.signPrefix}${hitokoto.content}`
+        let currentNick = selfQq
         try {
-          const info = await callLLOneBot('get_login_info', {})
+          const info = await callLLOneBot('get_login_info', {}, cfg)
           if (info && info.data && info.data.nickname) currentNick = info.data.nickname
         } catch (e) {}
-        
-        const r = await callLLOneBot('set_qq_profile', { nickname: currentNick, personal_note: signText })
-        
+        const r = await callLLOneBot('set_qq_profile', { nickname: currentNick, personal_note: signText }, cfg)
         if (r && r.retcode === 0) {
           await e.reply(`✅ 签名已更新：${signText}`)
         } else {
           await e.reply(`❌ 签名更新失败：${r?.message || '未知错误'}`)
         }
-        this.logHistory('sign', hitokoto)
-      } catch (err) {
-        await e.reply(`❌ 签名更新失败: ${err.message}`)
-      }
-    } else {
-      const hitokoto = await this.getHitokoto()
-      const content = `${config.shuoshuoPrefix}${hitokoto.full}`
-
-      await e.reply(`⏳ 正在尝试发送到QQ空间...`)
-      try {
+        this.logHistory('sign', hitokoto, selfQq)
+      } else {
+        const hitokoto = await this.getHitokoto(cfg)
+        const content = `${cfg.shuoshuoPrefix}${hitokoto.full}`
+        await e.reply(`⏳ 正在尝试发送到QQ空间...`)
         const sent = await this.trySendQzoneViaIcq(content)
         if (sent) {
           await e.reply(`✅ 已发送到QQ空间！\n${content}`)
         } else {
-          await this.sendPrivateShuoshuo(content)
+          await this.sendPrivateShuoshuo(content, cfg)
           await e.reply(`⚠️ Qzone发送失败(LLOneBot无此API)\n已降级为私聊发送:\n${content}`)
         }
-        this.logHistory('shuoshuo', hitokoto)
-      } catch (err) {
-        await e.reply(`❌ 发送失败: ${err.message}`)
+        this.logHistory('shuoshuo', hitokoto, selfQq)
       }
+    } catch (err) {
+      await e.reply(`❌ 发送失败: ${err.message}`)
+    } finally {
+      setTimeout(() => this._updating.delete(lockKey), 5000)
     }
   }
 
   async showStatus(e) {
     if (!e.isMaster) return e.reply('仅主人可用')
-    e.reply(`签名：${config.enableSignUpdate ? '✅' : '❌'} | ${config.signCron} | 前缀:${config.signPrefix}
-说说：${config.enableShuoshuoUpdate ? '✅' : '❌'} | ${config.shuoshuoCron} | 前缀:${config.shuoshuoPrefix}
-模式：${config.shuoshuoMode === 'qzone' ? 'Qzone(自动降级)' : '私聊主人'}`)
+    const selfQq = e.bot?.self_id || e.self_id || ''
+    const cfg = this.getConfig(e)
+    if (!cfg.enabled) return
+    e.reply(`[${selfQq}] 签名：${cfg.enableSignUpdate ? '✅' : '❌'} | ${cfg.signCron} | 前缀:${cfg.signPrefix}
+[${selfQq}] 说说：${cfg.enableShuoshuoUpdate ? '✅' : '❌'} | ${cfg.shuoshuoCron} | 前缀:${cfg.shuoshuoPrefix}
+模式：${cfg.shuoshuoMode === 'qzone' ? 'Qzone(自动降级)' : '私聊主人'}`)
   }
 
   async setPrefix(e) {
     if (!e.isMaster) return e.reply('仅主人可用')
+    const selfQq = e.bot?.self_id || e.self_id || ''
+    const cfg = this.getConfig(e)
+    if (!cfg.enabled) return
     const m = e.msg.match(/^#设置(签名|说说)前缀(.+)$/)
     if (!m) return e.reply('指令格式错误')
     const type = m[1], prefix = m[2]
-    if (type === '签名') config.signPrefix = prefix
-    else config.shuoshuoPrefix = prefix
-    e.reply(`${type}前缀已设为：${prefix}`)
-    saveConfig()
+    if (type === '签名') cfg.signPrefix = prefix
+    else cfg.shuoshuoPrefix = prefix
+    saveConfig(selfQq, cfg)
+    e.reply(`[${selfQq}] ${type}前缀已设为：${prefix}`)
   }
 
   async setShuoshuoMode(e) {
     if (!e.isMaster) return e.reply('仅主人可用')
+    const selfQq = e.bot?.self_id || e.self_id || ''
+    const cfg = this.getConfig(e)
+    if (!cfg.enabled) return
     const m = e.msg.match(/^#一言说说模式(.+)$/)
     if (!m) return e.reply('指令格式错误')
     const mode = m[1].trim()
     if (mode === 'qzone') {
-      config.shuoshuoMode = 'qzone'
-      e.reply('说说模式：Qzone空间（LLOneBot不支持时将自动降级为私聊）')
+      cfg.shuoshuoMode = 'qzone'
+      e.reply(`[${selfQq}] 说说模式：Qzone空间（LLOneBot不支持时将自动降级为私聊）`)
     } else if (mode === 'private' || mode === '私聊') {
-      config.shuoshuoMode = 'private'
-      e.reply('说说模式：私聊主人')
+      cfg.shuoshuoMode = 'private'
+      e.reply(`[${selfQq}] 说说模式：私聊主人`)
     } else {
-      e.reply(`当前模式：${config.shuoshuoMode}\n可选：qzone / private`)
+      e.reply(`[${selfQq}] 当前模式：${cfg.shuoshuoMode}\n可选：qzone / private`)
       return
     }
-    saveConfig()
+    saveConfig(selfQq, cfg)
   }
 
-  // ===== 设置定时时间 =====
   async setSignCron(e) {
     if (!e.isMaster) return e.reply('仅主人可用')
+    const selfQq = e.bot?.self_id || e.self_id || ''
+    const cfg = this.getConfig(e)
+    if (!cfg.enabled) return
     const m = e.msg.match(/^#设置签名时间\s+(.+)$/)
     if (!m) return e.reply('格式：#设置签名时间 秒 分 时 日 月 周\n例如：#设置签名时间 0 0 */6 * * *')
     const cronExpr = m[1].trim()
@@ -622,14 +606,17 @@ export class HitokotoSignPlugin extends plugin {
     } catch (err) {
       return e.reply(`❌ Cron格式错误：${err.message}`)
     }
-    config.signCron = cronExpr
-    saveConfig()
-    this.refreshSchedule()
-    e.reply(`✅ 签名时间已更新：${cronExpr}\n含义：${parseCron(cronExpr)}`)
+    cfg.signCron = cronExpr
+    saveConfig(selfQq, cfg)
+    this.refreshSchedule(selfQq, cfg)
+    e.reply(`✅ [${selfQq}] 签名时间已更新：${cronExpr}\n含义：${parseCron(cronExpr)}`)
   }
 
   async setShuoshuoCron(e) {
     if (!e.isMaster) return e.reply('仅主人可用')
+    const selfQq = e.bot?.self_id || e.self_id || ''
+    const cfg = this.getConfig(e)
+    if (!cfg.enabled) return
     const m = e.msg.match(/^#设置说说时间\s+(.+)$/)
     if (!m) return e.reply('格式：#设置说说时间 秒 分 时 日 月 周\n例如：#设置说说时间 0 0 * * * *')
     const cronExpr = m[1].trim()
@@ -639,19 +626,17 @@ export class HitokotoSignPlugin extends plugin {
     } catch (err) {
       return e.reply(`❌ Cron格式错误：${err.message}`)
     }
-    config.shuoshuoCron = cronExpr
-    saveConfig()
-    this.refreshSchedule()
-    e.reply(`✅ 说说时间已更新：${cronExpr}\n含义：${parseCron(cronExpr)}`)
+    cfg.shuoshuoCron = cronExpr
+    saveConfig(selfQq, cfg)
+    this.refreshSchedule(selfQq, cfg)
+    e.reply(`✅ [${selfQq}] 说说时间已更新：${cronExpr}\n含义：${parseCron(cronExpr)}`)
   }
 }
 
-// ===== Cron 解析辅助函数 =====
 function parseCron(expr) {
   const parts = expr.trim().split(/\s+/)
   if (parts.length < 6) return '格式不完整'
   const [sec, min, hour, day, month, week] = parts
-
   const desc = []
   if (sec === '0' && min === '0') {
     if (day === '*') {
@@ -666,7 +651,6 @@ function parseCron(expr) {
   } else {
     desc.push(`${formatHour(hour)}:${min.padStart(2, '0')}:${sec.padStart(2, '0')}`)
   }
-
   return desc.join('') || expr
 }
 
