@@ -1,10 +1,10 @@
-# napcat-hitokoto
+# hitokoto-sign-plugin
 
-基于 NapCat 协议，自动获取一言内容，定时更新 QQ 个性签名和 QQ 空间说说的 TRSS-Yunzai 插件。
+自动获取一言内容，定时更新 QQ 个性签名和 QQ 空间说说的 TRSS-Yunzai 插件。
 
 ## 介绍 📝
 
-**napcat-hitokoto** 是一个 TRSS-Yunzai 插件，通过 NapCat HTTP API 实现签名自动更新和 QQ 空间说说自动发布。
+**hitokoto-sign-plugin** 是一个 TRSS-Yunzai 插件，支持 NapCat 和 LLOneBot 协议端，实现签名自动更新和说说自动发布。
 
 > 💡 **Tip**
 >
