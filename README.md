@@ -1,10 +1,10 @@
-# napcat-hitokoto-plugin
+# napcat-hitokoto
 
 基于 NapCat 协议，自动获取一言内容，定时更新 QQ 个性签名和 QQ 空间说说的 TRSS-Yunzai 插件。
 
 ## 介绍 📝
 
-**napcat-hitokoto-plugin** 是一个 TRSS-Yunzai 插件，通过 NapCat HTTP API 实现签名自动更新和 QQ 空间说说自动发布。
+**napcat-hitokoto** 是一个 TRSS-Yunzai 插件，通过 NapCat HTTP API 实现签名自动更新和 QQ 空间说说自动发布。
 
 > 💡 **Tip**
 >
@@ -28,17 +28,16 @@
 
 ```bash
 # 直接克隆
-git clone --depth=1 https://github.com/YUYUYUYU2147/napcat-hitokoto ./plugins/napcat-hitokoto/
+git clone --depth=1 https://github.com/YUYUYUYU2147/hitokoto-sign-plugin ./plugins/hitokoto-sign-plugin/
 
 # 国内加速
-git clone --depth=1 https://ghproxy.com/https://github.com/YUYUYUYU2147/napcat-hitokoto ./plugins/napcat-hitokoto/
+git clone --depth=1 https://ghproxy.com/https://github.com/YUYUYUYU2147/hitokoto-sign-plugin ./plugins/hitokoto-sign-plugin/
 ```
 
-将 `index.js` 放入 TRSS-Yunzai 的 `plugins/napcat-hitokoto/` 目录：
+然后复制文件到 plugins 目录：
 
 ```bash
-mkdir -p plugins/napcat-hitokoto/
-cp index.js plugins/napcat-hitokoto/index.js
+cp plugins/hitokoto-sign-plugin/app/napcat-hitokoto.js plugins/napcat-hitokoto.js
 ```
 
 无需额外安装依赖（依赖 TRSS-Yunzai 已有的 node-fetch、node-schedule、moment）。
@@ -64,12 +63,12 @@ cp index.js plugins/napcat-hitokoto/index.js
 首次启动后自动在插件目录生成 `config-<QQ号>.json`，每个 Bot 独立配置：
 
 ```
-plugins/napcat-hitokoto/
+plugins/
+├── napcat-hitokoto.js
 ├── config-<QQ号1>.json
 ├── config-<QQ号2>.json
 ├── history-<QQ号1>.json
-├── history-<QQ号2>.json
-└── index.js
+└── history-<QQ号2>.json
 ```
 
 > 💡 **Tip**
