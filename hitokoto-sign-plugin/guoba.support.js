@@ -36,6 +36,22 @@ export const supportGuoba = () => {
     { field: 'shuoshuoCron', label: '说说发送频率', helpMessage: 'Cron 表达式', component: 'EasyCron' },
     { component: 'Divider', label: '一言API' },
     { field: 'hitokotoApi', label: '一言API地址', component: 'Input', componentProps: { placeholder: 'https://v1.hitokoto.cn' } },
+    {
+      field: 'hitokotoApiType',
+      label: '一言接口类型',
+      helpMessage: '自动识别可处理纯文本 / document.write / JSON',
+      component: 'Select',
+      componentProps: {
+        options: [
+          { label: '自动识别（推荐）', value: 0 },
+          { label: '纯文本（hitokoto?encode=text）', value: 1 },
+          { label: 'JSON - uapis（{text}）', value: 2 },
+          { label: 'JSON - xygeng（{data.content}）', value: 3 },
+          { label: 'JSON - hitokoto 标准', value: 4 }
+        ],
+        placeholder: '请选择'
+      }
+    },
     { field: 'hitokotoType', label: '一言类型', helpMessage: '留空为随机，可选 a/b/c/d/e/f/g/h/i/j/k', component: 'Input', componentProps: { placeholder: '留空随机' } },
     { component: 'Divider', label: '说说模式' },
     { field: 'shuoshuoMode', label: '发送模式', component: 'Select', componentProps: { options: [{ label: '私聊主人', value: 'private' }, { label: 'Qzone空间（自动降级私聊）', value: 'qzone' }] } },
@@ -79,6 +95,7 @@ export const supportGuoba = () => {
         data.signCron = cfg.signCron || '0 0 */6 * * *'
         data.shuoshuoCron = cfg.shuoshuoCron || '0 0 * * * *'
         data.hitokotoApi = cfg.hitokotoApi || 'https://v1.hitokoto.cn'
+        data.hitokotoApiType = cfg.hitokotoApiType ?? 0
         data.hitokotoType = cfg.hitokotoType || ''
         data.shuoshuoMode = cfg.shuoshuoMode || 'private'
         data.signPrefix = cfg.signPrefix || ''
@@ -94,7 +111,7 @@ export const supportGuoba = () => {
         const all = loadAll()
         for (const qq of Object.keys(all)) {
           const cfg = all[qq]
-          const sharedKeys = ['enabled', 'enableSignUpdate', 'enableShuoshuoUpdate', 'signCron', 'shuoshuoCron', 'hitokotoApi', 'hitokotoType', 'shuoshuoMode', 'signPrefix', 'shuoshuoPrefix', 'masterQq']
+          const sharedKeys = ['enabled', 'enableSignUpdate', 'enableShuoshuoUpdate', 'signCron', 'shuoshuoCron', 'hitokotoApi', 'hitokotoApiType', 'hitokotoType', 'shuoshuoMode', 'signPrefix', 'shuoshuoPrefix', 'masterQq']
           for (const k of sharedKeys) {
             if (k in data && k in cfg) cfg[k] = data[k]
           }

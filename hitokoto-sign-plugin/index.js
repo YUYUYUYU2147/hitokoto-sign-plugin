@@ -20,6 +20,7 @@ const defaultConfig = {
   enableSignUpdate: true,
   enableShuoshuoUpdate: true,
   hitokotoApi: 'http://113.31.103.19:8848',
+  hitokotoApiType: 0,
   hitokotoType: '',
   signPrefix: '',
   shuoshuoPrefix: '分享一条一言：',
@@ -218,15 +219,45 @@ export class HitokotoSignPlugin extends plugin {
     }
   }
 
+  /** 解析一言接口响应。0自动/1纯文本/2 uapis/3 xygeng/4 hitokoto JSON */
+  parseHitokotoResponse(raw, type = 0) {
+    const text = String(raw ?? '').trim()
+    if (!text) return null
+    const mode = Number(type) || 0
+    const unwrap = s => s.replace(/^document\.write\((?:["'`])?/, '').replace(/(?:["'`])?\)\s*;?$/, '').trim()
+    const asJson = s => { try { return JSON.parse(s) } catch { return null } }
+    const plain = content => ({ content, from: '网络', from_who: null })
+    if (mode === 1) return plain(text)
+    const json = asJson(text)
+    if (mode === 2) return json?.text ? plain(String(json.text)) : null
+    if (mode === 3) return json?.data?.content ? plain(String(json.data.content)) : null
+    if (mode === 4) {
+      if (!json) return null
+      return { content: json.hitokoto || '', from: json.from || '网络', from_who: json.from_who || null }
+    }
+    if (/^document\.write\(/.test(text)) return plain(unwrap(text))
+    if (json) {
+      if (json.hitokoto || json.text) {
+        return { content: json.hitokoto || json.text || '', from: json.from || (json.data?.origin ?? '网络'), from_who: json.from_who || json.data?.name || null }
+      }
+      if (json.data?.content) return plain(String(json.data.content))
+      return null
+    }
+    return plain(/^".*"$/.test(text) ? (asJson(text) ?? text) : text)
+  }
+
   async getHitokoto(cfg) {
     try {
       let url = cfg.hitokotoApi
-      if (cfg.hitokotoType) url += `?c=${cfg.hitokotoType}`
+      if (cfg.hitokotoType && /hitokoto\.cn/.test(url)) url += `${url.includes('?') ? '&' : '?'}c=${cfg.hitokotoType}`
       const res = await fetch(url)
-      const data = await res.json()
+      const raw = await res.text()
+      const parsed = this.parseHitokotoResponse(raw, cfg.hitokotoApiType)
+      if (!parsed?.content) throw new Error('一言接口未返回可用内容')
+      const { content, from, from_who } = parsed
       return {
-        content: data.hitokoto, from: data.from, from_who: data.from_who,
-        full: `${data.hitokoto} —— ${data.from_who ? data.from_who + ' 《' + data.from + '》' : '《' + data.from + '》'}`
+        content, from, from_who,
+        full: `${content} —— ${from_who ? from_who + ' 《' + from + '》' : '《' + from + '》'}`
       }
     } catch (e) {
       return { content: '人生最曼妙的风景，是内心的淡定与从容', from: '佚名', from_who: null,

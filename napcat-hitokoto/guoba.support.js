@@ -35,6 +35,22 @@ export const supportGuoba = () => {
     { field: 'shuoshuoCron', label: '说说发送频率', helpMessage: 'Cron 表达式', component: 'EasyCron' },
     { component: 'Divider', label: '一言API' },
     { field: 'hitokotoApi', label: '一言API地址', component: 'Input', componentProps: { placeholder: 'http://113.31.103.19:8848' } },
+    {
+      field: 'hitokotoApiType',
+      label: '一言接口类型',
+      helpMessage: '自动识别可处理纯文本 / document.write / JSON',
+      component: 'Select',
+      componentProps: {
+        options: [
+          { label: '自动识别（推荐）', value: 0 },
+          { label: '纯文本（hitokoto?encode=text）', value: 1 },
+          { label: 'JSON - uapis（{text}）', value: 2 },
+          { label: 'JSON - xygeng（{data.content}）', value: 3 },
+          { label: 'JSON - hitokoto 标准（hitokoto/from）', value: 4 }
+        ],
+        placeholder: '请选择'
+      }
+    },
     { field: 'hitokotoType', label: '一言类型', helpMessage: '留空为随机，可选 a/b/c/d/e/f/g/h/i/j/k', component: 'Input', componentProps: { placeholder: '留空随机' } },
     { component: 'Divider', label: '前缀设置' },
     { field: 'signPrefix', label: '签名前缀', component: 'Input', componentProps: { placeholder: '可选，添加到一言前' } },
@@ -75,6 +91,7 @@ export const supportGuoba = () => {
         data.signCron = cfg.signCron || '0 0 */6 * * ?'
         data.shuoshuoCron = cfg.shuoshuoCron || '0 0 */2 * * ?'
         data.hitokotoApi = cfg.hitokotoApi || 'http://113.31.103.19:8848'
+        data.hitokotoApiType = cfg.hitokotoApiType ?? 0
         data.hitokotoType = cfg.hitokotoType || ''
         data.signPrefix = cfg.signPrefix || ''
         data.shuoshuoPrefix = cfg.shuoshuoPrefix || '分享一条一言：'
@@ -89,7 +106,7 @@ export const supportGuoba = () => {
         const all = loadAll()
         for (const qq of Object.keys(all)) {
           const cfg = all[qq]
-          const sharedKeys = ['enableSignUpdate', 'enableShuoshuoUpdate', 'signCron', 'shuoshuoCron', 'hitokotoApi', 'hitokotoType', 'signPrefix', 'shuoshuoPrefix', 'masterQq']
+          const sharedKeys = ['enableSignUpdate', 'enableShuoshuoUpdate', 'signCron', 'shuoshuoCron', 'hitokotoApi', 'hitokotoApiType', 'hitokotoType', 'signPrefix', 'shuoshuoPrefix', 'masterQq']
           for (const k of sharedKeys) {
             if (k in data && k in cfg) cfg[k] = data[k]
           }
