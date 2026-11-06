@@ -74,6 +74,8 @@ export const supportGuoba = () => {
       description: '定时获取一言内容，通过Napcat协议更新签名与说说',
       author: '@Assistant',
       link: '',
+      // 锅巴优先展示 iconPath（绝对路径）
+      iconPath: path.join(dirPath, 'resources', 'icon.png'),
       isV3: true,
       isV2: false,
       showInMenu: 'auto',
